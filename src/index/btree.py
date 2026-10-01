@@ -2,7 +2,7 @@
 
  - Cada nodo tiene como máximo 2t-1 claves.
  - Nodos no raíz: >= t-1 claves (hojas) / >= t hijos (internos).
- - Las hojas guardan (clave -> RowID) y están enlazadas.
+ - Las hojas guardan (clave -> RowID) y están enlazadas (range scan).
  - Convención de separadores: hijo[i] < keys[i] <= hijo[i+1].
 """
 from bisect import bisect_left, bisect_right
@@ -24,6 +24,13 @@ class BTreeNode:
         self.children = [] if not leaf else None
         self.values = [] if leaf else None
         self.next = None  # siguiente hoja
+
+
+def _partition(n, cap):
+    """Reparte n elementos en ceil(n/cap) grupos de tamaño casi igual."""
+    g = -(-n // cap)
+    base, rem = divmod(n, g)
+    return [base + 1 if i < rem else base for i in range(g)]
 
 
 class BTree:
@@ -59,6 +66,20 @@ class BTree:
         if i < len(leaf.keys) and leaf.keys[i] == key:
             return leaf.values[i]
         return None
+
+    def range_search(self, lo, hi):
+        """Genera (clave, RowID) con lo <= clave <= hi, en orden."""
+        leaf = self._find_leaf(lo)
+        i = bisect_left(leaf.keys, lo)
+        while leaf is not None:
+            while i < len(leaf.keys):
+                if leaf.keys[i] > hi:
+                    return
+                yield leaf.keys[i], leaf.values[i]
+                i += 1
+            leaf, i = leaf.next, 0
+            if leaf is not None:
+                self.node_reads += 1
 
     # ----------------------------------------------------------- inserción
     def insert(self, key, rowid):
@@ -109,6 +130,53 @@ class BTree:
         self.splits += 1
         self._log(f"SPLIT interno #{node.id} -> #{node.id} | #{right.id}  (sube clave {sep})")
         return sep, right
+
+    # ---------------------------------------------------------- bulk load
+    def bulk_load(self, items):
+        """Construye el árbol desde cero a partir de pares (clave, RowID).
+        Ordena, empaqueta hojas al máximo y construye los niveles hacia arriba: O(n)."""
+        if self.size:
+            raise ValueError("bulk_load requiere un árbol vacío")
+        items = sorted(items, key=lambda kv: kv[0])
+        for a, b in zip(items, items[1:]):
+            if a[0] == b[0]:
+                raise DuplicateKeyError(a[0])
+        if not items:
+            return
+        level, pos, prev = [], 0, None
+        for s in _partition(len(items), self.max_keys):
+            leaf = BTreeNode(leaf=True)
+            chunk = items[pos:pos + s]
+            leaf.keys = [k for k, _ in chunk]
+            leaf.values = [v for _, v in chunk]
+            pos += s
+            if prev:
+                prev.next = leaf
+            prev = leaf
+            level.append((leaf, leaf.keys[0]))   # (nodo, clave mínima del subárbol)
+        height = 1
+        while len(level) > 1:
+            nxt, pos = [], 0
+            for s in _partition(len(level), self.max_keys + 1):
+                group = level[pos:pos + s]
+                pos += s
+                node = BTreeNode(leaf=False)
+                node.children = [g[0] for g in group]
+                node.keys = [g[1] for g in group[1:]]
+                nxt.append((node, group[0][1]))
+            level = nxt
+            height += 1
+        self.root, self.height, self.size = level[0][0], height, len(items)
+        self._log(f"BULK LOAD: {len(items)} claves, altura = {height}")
+
+    # --------------------------------------------------------- utilidades
+    def level_sizes(self):
+        """Cantidad de nodos por nivel (raíz primero)."""
+        out, level = [], [self.root]
+        while level:
+            out.append(len(level))
+            level = [c for n in level if not n.leaf for c in n.children]
+        return out
 
     def check_invariants(self):
         """Verifica las propiedades del árbol; lanza AssertionError si alguna falla."""

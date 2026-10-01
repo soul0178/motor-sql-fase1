@@ -13,7 +13,7 @@ class TestBTreeBasic(unittest.TestCase):
 
     def test_empty(self):
         t = BTree(t=2)
-        self.assertIsNone(t.search(1))
+        self.assertIsNone(t.search(1)); self.assertEqual(list(t.range_search(0, 9)), [])
         self.assertTrue(t.check_invariants())
 
     def test_insert_search_and_missing(self):
@@ -69,13 +69,52 @@ class TestSplitAndGrowth(unittest.TestCase):
                 self.assertEqual(t.size, 500)
                 self.assertTrue(all(t.search(k) == rid(k) for k in range(500)))
 
+    def test_leaf_chain_in_order(self):
+        t = BTree(t=3); keys = random.Random(1).sample(range(10000), 2000)
+        for k in keys: t.insert(k, rid(k))
+        self.assertEqual([k for k, _ in t.range_search(-1, 10**9)], sorted(keys))
 
+    def test_range_search(self):
+        t = BTree(t=2)
+        for k in range(0, 100, 2): t.insert(k, rid(k))
+        self.assertEqual([k for k, _ in t.range_search(11, 21)], [12, 14, 16, 18, 20])
+        self.assertEqual(list(t.range_search(200, 300)), [])
+        self.assertEqual([k for k, _ in t.range_search(-5, 3)], [0, 2])
 
     def test_search_cost_is_height(self):
         t = BTree(t=2)
         for k in range(1000): t.insert(k, rid(k))
         t.node_reads = 0; t.search(500)
         self.assertEqual(t.node_reads, t.height)
+
+
+class TestBulkLoad(unittest.TestCase):
+    def test_all_sizes_small_degree(self):
+        for deg in (2, 3):
+            for n in range(0, 200):
+                t = BTree(t=deg); items = [(k, rid(k)) for k in range(n)]
+                random.Random(n).shuffle(items); t.bulk_load(items)
+                self.assertEqual(t.size, n)
+                if n: t.check_invariants()
+                self.assertTrue(all(t.search(k) == rid(k) for k in range(n)))
+
+    def test_large_and_height(self):
+        t = BTree(t=50); t.bulk_load([(k, rid(k)) for k in range(200000)])
+        t.check_invariants()
+        self.assertLessEqual(t.height, 3)
+        self.assertEqual(t.search(123456), rid(123456))
+
+    def test_insert_after_bulk(self):
+        t = BTree(t=2); t.bulk_load([(k, rid(k)) for k in range(0, 200, 2)])
+        for k in range(1, 200, 2): t.insert(k, rid(k))
+        t.check_invariants(); self.assertEqual(t.size, 200)
+        self.assertEqual([k for k, _ in t.range_search(0, 199)], list(range(200)))
+
+    def test_bulk_errors(self):
+        t = BTree(t=2)
+        with self.assertRaises(DuplicateKeyError): t.bulk_load([(1, rid(1)), (1, rid(1))])
+        t.insert(1, rid(1))
+        with self.assertRaises(ValueError): t.bulk_load([(2, rid(2))])
 
 
 class TestMassInsertion(unittest.TestCase):

@@ -12,7 +12,7 @@ python -m unittest discover -s tests -t . -v
 
 ## Estado del proyecto
 - [x] Storage (serializador, páginas, HeapFile, RowIDs)
-- [x] Árbol B+: search, insert, split de hojas e internos
-- [ ] Bulk load y range scan
+- [x] Árbol B+: search, insert, split
+- [x] Bulk load y range scan
 - [ ] Integración Table (heap + índice)
 - [ ] Benchmarks

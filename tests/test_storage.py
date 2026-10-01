@@ -1,7 +1,8 @@
-import unittest
+import os, tempfile, unittest
 from tests import _path  # noqa
 from storage.tuple_serializer import Schema, Column, INT, VARCHAR
 from storage.page import SlottedPage, PAGE_SIZE, MAX_RECORD
+from storage.heap_file import HeapFile, RowID
 
 SCHEMA = Schema([Column("id", INT), Column("name", VARCHAR, 20)])
 
@@ -50,6 +51,44 @@ class TestPage(unittest.TestCase):
         p = SlottedPage(); p.insert(b"hola")
         self.assertEqual(SlottedPage(bytes(p.data)).get(0), b"hola")
         with self.assertRaises(ValueError): SlottedPage(b"short")
+
+
+class TestHeapFile(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory(); self.path = os.path.join(self.d.name, "t.heap")
+    def tearDown(self): self.d.cleanup()
+
+    def test_rowids_and_reads(self):
+        h = HeapFile(self.path)
+        ids = [h.insert(SCHEMA.serialize((i, f"n{i}"))) for i in range(2000)]
+        self.assertGreater(h.num_pages, 1)
+        self.assertEqual(len(set(ids)), 2000)
+        h.flush()
+        for i in (0, 999, 1999):
+            self.assertEqual(SCHEMA.deserialize(h.get(ids[i])), (i, f"n{i}"))
+        h.close()
+
+    def test_scan_counts_every_page(self):
+        h = HeapFile(self.path)
+        for i in range(2000): h.insert(SCHEMA.serialize((i, "x")))
+        h.flush(); h.reset_counters()
+        rows = [SCHEMA.deserialize(r)[0] for _, r in h.scan()]
+        self.assertEqual(rows, list(range(2000)))
+        self.assertEqual(h.reads, h.num_pages)
+        h.close()
+
+    def test_reopen(self):
+        h = HeapFile(self.path)
+        rid = h.insert(SCHEMA.serialize((7, "persist"))); h.close()
+        h2 = HeapFile(self.path, create=False)
+        self.assertEqual(SCHEMA.deserialize(h2.get(rid)), (7, "persist"))
+        rid2 = h2.insert(SCHEMA.serialize((8, "more")))   # continúa en la última página
+        self.assertEqual(rid2, RowID(0, 1)); h2.close()
+
+    def test_bad_rowid(self):
+        h = HeapFile(self.path)
+        with self.assertRaises(IndexError): h.get(RowID(3, 0))
+        h.close()
 
 
 if __name__ == "__main__":

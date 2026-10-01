@@ -21,7 +21,10 @@ class Table:
         return rowid
 
     def bulk_insert(self, rows):
-        """Escribe todas las filas al heap y construye el índice con bulk load."""
+        """Escribe todas las filas al heap y construye el índice con bulk load.
+        Requiere una tabla vacía (se valida ANTES de escribir en el heap)."""
+        if self.index.size:
+            raise ValueError("bulk_insert requiere una tabla vacía")
         pairs = []
         for values in rows:
             rowid = self.heap.insert(self.schema.serialize(values))

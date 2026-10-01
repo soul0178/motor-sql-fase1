@@ -11,9 +11,8 @@ python -m unittest discover -s tests -t . -v
 ```
 
 ## Estado del proyecto
-- [ ] Storage Engine
+- [x] Serializador de tuplas (INT, VARCHAR) y página con slots
+- [ ] HeapFile y RowIDs
 - [ ] Árbol B+
 - [ ] Balanceo y bulk load
 - [ ] Benchmarks
-
-_Solo estructura de carpetas._
